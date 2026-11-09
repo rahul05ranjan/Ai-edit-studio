@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DATA_ROOT, PROJECT_ROOT, StudioError } from './paths.mjs';
 import { findFfmpegTools, inspectFfmpeg } from './ffmpeg.mjs';
 import { runProcess } from './process.mjs';
-import { normalizeWords, wordsFromSegments } from '../public/transcript.js';
+import { normalizeWords, wordsFromSegments, CJK_RE } from '../public/transcript.js';
 import { parseSrtCues } from '../public/captions.js';
 
 const exe = name => `${name}${process.platform === 'win32' ? '.exe' : ''}`;
@@ -86,9 +86,12 @@ export function parseWhisperJson(json) {
       const text = String(tok.text ?? '');
       if (!text || /^\[_[A-Z]+_?\d*\]$|^<\|.*\|>$|^\[_TT_\d+\]$/.test(text.trim())) continue;
       const from = Number(tok.offsets?.from) / 1000, to = Number(tok.offsets?.to) / 1000;
-      const startsWord = /^\s/.test(text) || !cur;
       const piece = text.trim();
       if (!piece) continue;
+      // A CJK token starts a new word without a leading space: the writing has none (whisper.cpp
+      // only emits the space for space-separated languages). CJK punctuation (script Common,
+      // e.g. 。！？) still attaches to the previous word through the branches below.
+      const startsWord = /^\s/.test(text) || !cur || (CJK_RE.test(piece) && !/^[.,!?;:…'"”’)]+$/.test(piece));
       // Punctuation tokens attach to the previous word.
       if (cur && !startsWord) { cur.text += piece; cur.end = Math.max(cur.end, to); cur.p = Math.min(cur.p, Number(tok.p ?? 1)); continue; }
       if (cur && /^[.,!?;:…'"”’)]+$/.test(piece)) { cur.text += piece; continue; }
@@ -138,7 +141,7 @@ export async function transcribeFile(file, { language = 'auto', model: wanted, w
   { timeoutMs: 4 * 60 * 60_000 });
   const cues = parseSrtCues(await fsp.readFile(srt, 'utf8'), 0);
   const segments = cues.map(c => ({ start: c.start, end: c.end, text: c.text }));
-  return { engine: 'ffmpeg-whisper', model: model.name, language, words: wordsFromSegments(segments), segments, wordTiming: 'estimated' };
+  return { engine: 'ffmpeg-whisper', model: model.name, language, words: wordsFromSegments(segments, language), segments, wordTiming: 'estimated' };
 }
 
 /** Downloads whisper.cpp (Windows release zip) and a model into the data folder. Explicit user action only. */

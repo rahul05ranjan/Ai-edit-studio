@@ -1,6 +1,7 @@
 // Clip finder: long recording → the best self-contained short clips. Uses sentence boundaries
 // from a transcript when there is one, otherwise scene cuts and quiet moments. Measured signals only.
 import { curvesFor } from '../public/insights.js';
+import { joinWords } from '../public/transcript.js';
 
 const STEP = 0.5;
 const SENTENCE_END = /[.!?…。！？]["”')\]」』）]?$/;
@@ -57,8 +58,8 @@ export function findClips({ sources, transcripts = {}, count = 5, minSeconds = 1
           if (d > maxSeconds) break;
           if (d < minSeconds) continue;
           const n = spans[b].to - spans[a].from + 1, rate = n / d;
-          const firstText = words.slice(spans[a].from, spans[a].to + 1).map(w => w.text).join(' ');
-          const text = words.slice(spans[a].from, spans[b].to + 1).map(w => w.text).join(' ');
+          const firstText = joinWords(words.slice(spans[a].from, spans[a].to + 1).map(w => w.text));
+          const text = joinWords(words.slice(spans[a].from, spans[b].to + 1).map(w => w.text));
           const gaps = spans.slice(a + 1, b + 1).reduce((s, sp, k) => s + Math.max(0, sp.start - spans[a + k].end - 0.4), 0);
           candidates.push({ sourceIndex, start: r3(start), end: r3(end), words: n, rate, firstText, text, dead: gaps / d,
             complete: SENTENCE_END.test(words[spans[b].to].text) ? 1 : 0.6, hookBonus: /[?!]/.test(firstText) ? 0.08 : 0 });

@@ -12,6 +12,35 @@ const ALL_FILLERS = new Set(Object.values(FILLERS).flat());
 const round = n => Math.round(n * 1000) / 1000;
 export const bare = text => String(text ?? '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}']+/gu, '');
 
+
+// CJK text has no spaces between words: segment it (built-in Intl.Segmenter, no dependency)
+// instead of splitting on spaces. Hangul uses spaces and stays on the plain path.
+export const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const hasCJK = text => CJK_RE.test(String(text ?? ''));
+
+/** Word pieces of `text`: CJK text is segmented by dictionary, other text splits on whitespace. */
+export function splitWords(text, lang) {
+  const t = String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return [];
+  if (!hasCJK(t)) return t.split(' ').filter(Boolean);
+  const locale = lang ?? (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(t) ? 'ja' : 'zh');
+  const out = [];
+  for (const { segment, isWordLike } of new Intl.Segmenter(locale, { granularity: 'word' }).segment(t)) {
+    if (!segment.trim()) continue;                    // whitespace between CJK words disappears
+    if (!isWordLike && out.length) { out[out.length - 1] += segment; continue; }  // punctuation attaches to the previous word
+    out.push(segment);
+  }
+  return out.filter(Boolean);
+}
+
+/** Join word pieces without inventing spaces between CJK words (English/Dutch join unchanged). */
+export function joinWords(parts) {
+  return [...parts].map(String).reduce((acc, piece, i) => {
+    if (!i) return piece;
+    return acc + (CJK_RE.test(acc.at(-1) ?? '') && CJK_RE.test(piece[0] ?? '') ? '' : ' ') + piece;
+  }, '');
+}
+
 /** Clean, sorted, non-overlapping words: [{start, end, text, p?}]. */
 export function normalizeWords(rows = [], duration = Infinity) {
   if (!Array.isArray(rows)) throw new Error('words must be an array.');
@@ -30,10 +59,10 @@ export function normalizeWords(rows = [], duration = Infinity) {
 }
 
 /** Segment-level timings (SRT, FFmpeg whisper) → approximate word timings by character length. */
-export function wordsFromSegments(segments = []) {
+export function wordsFromSegments(segments = [], lang) {
   const words = [];
   for (const seg of segments) {
-    const parts = String(seg.text ?? '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    const parts = splitWords(seg.text, lang);
     const span = Number(seg.end) - Number(seg.start);
     if (!parts.length || !(span > 0)) continue;
     const weights = parts.map(p => Math.max(1, p.length) + 1), total = weights.reduce((a, b) => a + b, 0);
@@ -48,13 +77,13 @@ const CJK_SENTENCE_END = /[。！？]["”')\]」』）]?$/;
 /** Readable caption cues from words: breaks at sentence ends, pauses, length and duration. */
 export function wordsToCaptions(words, sourceIndex, { maxChars = 42, maxSeconds = 3.2, pause = 0.6, breakBefore = new Set() } = {}) {
   const cues = []; let cur = null;
-  const flush = () => { if (cur?.words.length) cues.push({ sourceIndex, start: round(cur.start), end: round(Math.max(cur.end, cur.start + 0.7)), text: cur.words.join(' ').slice(0, 180), words: cur.timed }); cur = null; };
+  const flush = () => { if (cur?.words.length) cues.push({ sourceIndex, start: round(cur.start), end: round(Math.max(cur.end, cur.start + 0.7)), text: joinWords(cur.words).slice(0, 180), words: cur.timed }); cur = null; };
   words.forEach((w, i) => {
     const text = w.text;
-    if (cur && (breakBefore.has(i) || w.start - cur.end > pause || (cur.words.join(' ') + ' ' + text).length > maxChars || w.end - cur.start > maxSeconds)) flush();
+    if (cur && (breakBefore.has(i) || w.start - cur.end > pause || (joinWords(cur.words) + ' ' + text).length > maxChars || w.end - cur.start > maxSeconds)) flush();
     if (!cur) cur = { start: w.start, end: w.end, words: [], timed: [] };
     cur.words.push(text); cur.timed.push({ start: round(w.start), end: round(w.end), text: text.slice(0, 40) }); cur.end = w.end;
-    if (CJK_SENTENCE_END.test(text) || (/[.!?…]$/.test(text) && cur.words.join(' ').length > 12)) flush();
+    if (CJK_SENTENCE_END.test(text) || (/[.!?…]$/.test(text) && joinWords(cur.words).length > 12)) flush();
   });
   flush();
   for (let i = 0; i < cues.length - 1; i++) if (cues[i].end > cues[i + 1].start) cues[i].end = Math.max(cues[i].start + 0.3, cues[i + 1].start - 0.02);
@@ -97,7 +126,7 @@ export function findPauses(words, { min = 0.8, keep = 0.2, from = 0, to = Infini
 
 /** Word index ranges whose text matches a phrase (case/punctuation-insensitive). */
 export function matchPhrase(words, phrase) {
-  const target = String(phrase ?? '').split(/\s+/).map(bare).filter(Boolean);
+  const target = splitWords(phrase).map(bare).filter(Boolean);
   if (!target.length) return [];
   const keys = words.map(w => bare(w.text)); const hits = [];
   for (let i = 0; i + target.length <= keys.length; i++) {

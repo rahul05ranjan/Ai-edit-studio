@@ -1,5 +1,6 @@
 // Shared browser/engine contract: captions stay attached to source time, not edit time.
 import { LIMITS, overlapOf } from './edit-ops.js';
+import { splitWords, joinWords } from './transcript.js';
 export function normalizeCaptions(rows = []) {
   if (!Array.isArray(rows) || rows.length > 300) throw new Error('At most 300 caption lines.');
   return rows.map((c, i) => {
@@ -23,7 +24,7 @@ export function normalizeCaptions(rows = []) {
 /** Word timings for a cue: real ones when present, otherwise spread over the cue by word length. */
 export function cueWords(cue) {
   if (cue.words?.length) return cue.words;
-  const parts = String(cue.text).split(' ').filter(Boolean), span = cue.end - cue.start;
+  const parts = splitWords(cue.text), span = cue.end - cue.start;
   const weights = parts.map(p => p.length + 1), total = weights.reduce((a, b) => a + b, 0) || 1;
   let t = cue.start;
   return parts.map((text, i) => { const d = span * weights[i] / total; const w = { start: t, end: t + d, text }; t += d; return w; });
@@ -103,7 +104,7 @@ export function mapCaptions(rows, clips, offset = 0) {
         const words = cueWords(cue).map(w => ({ start: w.start + offset, end: w.end + offset, text: w.text }))
           .filter(w => (w.start + w.end) / 2 >= start && (w.start + w.end) / 2 <= end)
           .map(w => ({ start: at(Math.max(start, w.start)), end: at(Math.min(end, w.end)), text: w.text }));
-        result.push({ start: at(start), end: at(end), text: words.length && words.length < cueWords(cue).length ? words.map(w => w.text).join(' ') : cue.text, words });
+        result.push({ start: at(start), end: at(end), text: words.length && words.length < cueWords(cue).length ? joinWords(words.map(w => w.text)) : cue.text, words });
       }
     }
     cursor += (clip.end - clip.start) / speed;

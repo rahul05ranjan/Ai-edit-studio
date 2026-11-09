@@ -2,7 +2,7 @@
 // from a script, plan a multicam edit, and export EDL/FCPXML/OTIO/CSV/chapters/SRT/VTT.
 import { layout, totalDuration, mergeRanges, sectionSpans, applyOperations, LIMITS } from '../public/edit-ops.js';
 import { curvesFor, clipEnergy, highlights } from '../public/insights.js';
-import { findFillers, findPauses, wordsInEdit, bare } from '../public/transcript.js';
+import { findFillers, findPauses, wordsInEdit, bare, joinWords } from '../public/transcript.js';
 import { mapCaptions, toSrt, toVtt } from '../public/captions.js';
 import { sentences } from './clips.mjs';
 
@@ -158,7 +158,7 @@ export function searchProject({ clips, sources, options = {}, transcripts = {}, 
     const si = Number(key); if (!t?.words?.length) continue;
     const marked = wordsInEdit(t.words, clips, si);
     for (const h of searchWords(t.words, q, { limit })) {
-      const a = t.words[h.from], b = t.words[h.to], ctx = t.words.slice(Math.max(0, h.from - 6), h.to + 7).map(w => w.text).join(' ');
+      const a = t.words[h.from], b = t.words[h.to], ctx = joinWords(t.words.slice(Math.max(0, h.from - 6), h.to + 7).map(w => w.text));
       const inEdit = marked[h.from].inEdit;
       out.push({ kind: 'speech', score: h.score, sourceIndex: si, start: r3(a.start), end: r3(b.end), words: [h.from, h.to], text: ctx, inEdit,
         ...(inEdit ? { timeline: marked[h.from].timeline } : { insert: { op: 'insert', sourceIndex: si, start: r3(Math.max(0, a.start - 0.15)), end: r3(b.end + 0.25) } }) });
@@ -191,7 +191,7 @@ export function assembleFromScript({ script, transcripts, sources, minScore = 0.
         const a = t.words[h.from], b = t.words[h.to];
         const range = { start: Math.max(0, a.start - pad, h.from ? t.words[h.from - 1].end + 0.02 : 0), end: Math.min(sources[si]?.duration ?? Infinity, b.end + pad + 0.1, t.words[h.to + 1]?.start ?? Infinity) };
         if (used.some(u => u.si === si && Math.min(u.end, range.end) - Math.max(u.start, range.start) > 0)) continue;
-        if (!best || h.score > best.score) best = { si, ...range, score: h.score, text: t.words.slice(h.from, h.to + 1).map(w => w.text).join(' ') };
+        if (!best || h.score > best.score) best = { si, ...range, score: h.score, text: joinWords(t.words.slice(h.from, h.to + 1).map(w => w.text)) };
       }
     }
     if (!best || best.end - best.start < LIMITS.minSource) { unmatched.push({ line: k + 1, text: line }); return; }

@@ -29,7 +29,8 @@ test('transcript captions split short Chinese and Japanese sentences at full-wid
   const chinese = ['你好。', '我们', '开始', '吧！', '今天', '天气', '很好。', '明天', '见。'];
   const japanese = ['「そうです。」', '『本当？』', '（はい！）', '“またね。”', '次へ'];
   for (const [texts, expected] of [
-    [chinese, ['你好。', '我们 开始 吧！', '今天 天气 很好。', '明天 见。']],
+    // #62: joined CJK words carry no invented spaces — the previous pin had them
+    [chinese, ['你好。', '我们开始吧！', '今天天气很好。', '明天见。']],
     [japanese, japanese],
   ]) {
     const words = texts.map((text, i) => ({ start: i * 0.4, end: i * 0.4 + 0.35, text }));
